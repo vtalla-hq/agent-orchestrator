@@ -20,6 +20,7 @@ def startup():
 
 class NewRun(BaseModel):
     goal: str = Field(min_length=3, max_length=2000)
+    require: list[str] = Field(default=[], max_length=5, description="Tools the run must call before it can finish, e.g. [\"save_to_library\"]")
 
 
 class Decision(BaseModel):
@@ -42,8 +43,13 @@ def _run(run_id: str) -> dict:
 def create_run(body: NewRun):
     run_id = uuid.uuid4().hex
     db.create_run(run_id, body.goal)
-    run_agent.delay(run_id, goal=body.goal)
+    run_agent.delay(run_id, goal=body.goal, require=body.require)
     return {"id": run_id, "status": "queued"}
+
+
+@app.get("/runs")
+def list_runs(status: str | None = None):
+    return db.list_runs(status)
 
 
 @app.get("/runs/{run_id}")

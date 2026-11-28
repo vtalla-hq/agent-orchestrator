@@ -20,4 +20,5 @@ services:
     ports: ["8000:8000"]
   worker:
     <<: *app
-    command: celery -A orchestrator.worker worker --loglevel=info
+    # one run at a time keeps Groq's free tier (8k tokens/min) from rate limiting every run
+    command: celery -A orchestrator.worker worker --loglevel=info --concurrency=1

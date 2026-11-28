@@ -1,0 +1,12 @@
+# Common questions for the Spotter library builder: one per line, # for comments.
+# Harm reduction only: what a drug or supplement does to bloodwork and health, never doses or protocols.
+Does creatine supplementation raise serum creatinine or harm kidney function in healthy adults?
+Does testosterone therapy raise hematocrit, and what hematocrit level is linked to higher clot or cardiovascular risk?
+Do anabolic-androgenic steroids lower HDL cholesterol, and does HDL recover after stopping?
+Do oral anabolic steroids raise ALT and AST, and how is that told apart from liver injury?
+Does heavy resistance training raise ALT, AST or creatine kinase in healthy people, and for how long?
+Does testosterone therapy raise PSA or prostate cancer risk?
+Does high-dose biotin supplementation interfere with thyroid and hormone blood tests?
+Does anabolic steroid use raise blood pressure or cause left ventricular hypertrophy?
+Does testosterone therapy or anabolic steroid use affect estradiol and what does high estradiol mean in men?
+Does vitamin D supplementation raise blood calcium in healthy adults?
