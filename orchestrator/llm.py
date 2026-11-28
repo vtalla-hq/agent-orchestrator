@@ -87,12 +87,19 @@ class OpenAICompat:
                 prompt += f"\n\n(Your last reply failed: {e.message[:200]}. The only tool here is `respond`.)"
 
     def choose_tool(self, system, prompt, tools):
-        msg = self._chat(
-            system,
-            prompt,
-            tools=[{"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.json_schema()}} for t in tools],
-            parallel_tool_calls=False,
-        )
+        import openai
+
+        specs = [{"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.json_schema()}} for t in tools]
+        for attempt in range(3):
+            try:
+                msg = self._chat(system, prompt, tools=specs, parallel_tool_calls=False)
+                break
+            except openai.BadRequestError as e:
+                # Groq checks tool arguments against the schema itself and 400s on a bad call
+                # (e.g. 4 PMIDs when the limit is 3): tell the model and let it try again
+                if attempt == 2 or "tool call validation failed" not in str(e).lower():
+                    raise
+                prompt += f"\n\n(Your last tool call was rejected: {str(e)[-200:]}. Fix the arguments and call again.)"
         call = (msg.tool_calls or [None])[0]
         if not call:
             return msg.content or "", None, {}

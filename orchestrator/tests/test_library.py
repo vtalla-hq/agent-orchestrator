@@ -136,3 +136,24 @@ def test_load_env_reads_dotenv_without_overriding(tmp_path, monkeypatch):
 
     assert os.environ["LIBRARY_TARGET"] == "spotter" and os.environ["SUPABASE_URL"] == "https://x.supabase.co"
     assert os.environ["SUPABASE_SERVICE_ROLE_KEY"] == "" and os.environ["AI_MODEL"] == "from-shell"
+
+
+def test_groq_bad_tool_call_is_retried_with_the_error(monkeypatch):
+    import openai
+
+    from orchestrator.llm import OpenAICompat
+
+    llm = OpenAICompat.__new__(OpenAICompat)
+    prompts = []
+    err = openai.BadRequestError("Tool call validation failed: `/pmids`: maxItems: got 4, want 3", response=httpx.Response(400, request=httpx.Request("POST", "http://x")), body=None)
+
+    def chat(system, prompt, **kw):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            raise err
+        call = type("C", (), {"function": type("F", (), {"name": "read_abstracts", "arguments": '{"pmids": ["1", "2", "3"]}'})()})()
+        return type("M", (), {"content": "", "tool_calls": [call]})()
+
+    llm._chat = chat
+    assert llm.choose_tool("s", "p", list(tools.TOOLS.values())) == ("", "read_abstracts", {"pmids": ["1", "2", "3"]})
+    assert "maxItems: got 4, want 3" in prompts[1]
