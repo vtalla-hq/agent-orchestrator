@@ -150,7 +150,7 @@ def test_parse_articles():
     <PublicationTypeList><PublicationType>Journal Article</PublicationType><PublicationType>Randomized Controlled Trial</PublicationType></PublicationTypeList>
     </Article></MedlineCitation></PubmedArticle></PubmedArticleSet>"""
     [a] = parse_articles(xml)
-    assert a == {"pmid": "42", "title": "Creatine and kidneys", "journal": "J X", "year": "2021", "types": ["Randomized Controlled Trial"], "abstract": "METHODS: RCT. RESULTS: No harm."}
+    assert a == {"pmid": "42", "title": "Creatine and kidneys", "journal": "J X", "year": "2021", "types": ["Randomized Controlled Trial"], "mesh": [], "abstract": "METHODS: RCT. RESULTS: No harm."}
 
 
 def test_passages_around_keyword():

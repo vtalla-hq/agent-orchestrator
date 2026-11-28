@@ -94,6 +94,7 @@ def parse_articles(xml: str) -> list[dict]:
                 "journal": text(".//ISOAbbreviation") or text(".//Journal/Title"),
                 "year": (text(".//PubDate/Year") or text(".//PubDate/MedlineDate"))[:4] or None,
                 "types": [x for x in ("".join(t.itertext()).strip() for t in art.iter("PublicationType")) if x != "Journal Article"],
+                "mesh": ["".join(d.itertext()).strip() for d in art.iter("DescriptorName")],
                 "abstract": " ".join(parts) or "(no abstract)",
             }
         )

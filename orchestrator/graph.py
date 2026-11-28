@@ -145,15 +145,21 @@ def build_graph(llm, log: Callable = lambda *a, **k: None, checkpointer=None):
             parsed = parsed.model_copy(update={"pmids": [p for p in parsed.pmids if p in read]})
             extra = {"studies": [{"pmid": p, "title": read[p]} for p in parsed.pmids], "dropped_unread": unread}
         if t.high_risk:
-            # pauses the run; resumed with Command(resume={"approved": bool, "reason": str})
+            # pauses the run; resumed with Command(resume={"approved": bool, "reason": str, "pmids"?: [...]})
+            # from a human (/approve, cli review) or the rule-based reviewer (cli run --auto)
             decision = interrupt({"tool": name, "input": parsed.model_dump(), "why": call.get("text", ""), **extra})
+            who = decision.get("by", "A human")
             if not decision.get("approved"):
-                out = f"A human rejected this action. Reason: {decision.get('reason') or 'none given'}. Do not retry it."
+                out = f"{who} rejected this action. Reason: {decision.get('reason') or 'none given'}. Do not retry it."
                 return {"pending": None, "observations": [{**obs, "output": out}]}
+            if name == "save_to_library" and decision.get("pmids"):  # approve part of the batch (never add to it)
+                parsed = parsed.model_copy(update={"pmids": [p for p in parsed.pmids if p in decision["pmids"]]})
         try:
             out = t.fn(parsed)
         except Exception as e:  # a failed tool is an observation, not a crashed run
             out = f"Tool failed: {type(e).__name__}: {e}"
+        if decision_note := (decision.get("reason") if t.high_risk and decision.get("approved") else None):
+            out += f" {who}: {decision_note}"
         return {"pending": None, "observations": [{**obs, "output": out}]}
 
     def reflect(s: State):

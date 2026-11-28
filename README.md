@@ -61,6 +61,8 @@ pip install -r requirements.txt
 LLM_PROVIDER=groq GROQ_API_KEY=... python -m orchestrator.cli run seeds.txt
 ```
 
+Or let a rule-based reviewer approve instead of you: `python -m orchestrator.cli run seeds.txt --auto`. It checks each proposed study against PubMed's own metadata and keeps only meta-analyses, systematic reviews, RCTs, guidelines and cohorts that aren't retracted, aren't case reports, letters or editorials, and aren't animal-only. It drops the rest with a reason, which goes back to the agent (`orchestrator/review.py`).
+
 To write approved studies into Spotter itself, add `LIBRARY_TARGET=spotter`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env`. Spotter's `supabase/ask.sql` has to have been run on that project first.
 
 Or locally, with Redis 8+ and Postgres running:

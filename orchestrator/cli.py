@@ -71,7 +71,7 @@ def review(c: httpx.Client, wait: bool = False, ask=input, poll: float = 10) -> 
         time.sleep(poll)
 
 
-def run_local(path: str, llm=None, ask=input) -> list[dict]:
+def run_local(path: str, llm=None, ask=input, auto: bool = False, reviewer=None) -> list[dict]:
     """Research each question in this process: no Redis, Postgres or Celery. State is in memory,
     approvals are asked here, and approved saves are logged to LIBRARY_LOG (default library.jsonl)."""
     from langgraph.checkpoint.memory import InMemorySaver
@@ -89,10 +89,17 @@ def run_local(path: str, llm=None, ask=input) -> list[dict]:
         try:
             g.invoke({"goal": GOAL.format(q=q), "require": ["save_to_library"]}, cfg)
             while (st := g.get_state(cfg)).interrupts:
-                print(show({"id": f"local-{i}", "goal": q, "pending_approval": st.interrupts[0].value}))
-                ok = ask("Approve? [y/N] ").strip().lower() in ("y", "yes")
-                reason = "" if ok else ask("Reason (sent to the agent): ").strip()
-                g.invoke(Command(resume={"approved": ok, "reason": reason}), cfg)
+                pending = st.interrupts[0].value
+                print(show({"id": f"local-{i}", "goal": q, "pending_approval": pending}))
+                if auto:
+                    from .review import review
+
+                    decision = (reviewer or review)(pending)
+                    print(f"Auto-review: {'approved ' + ', '.join(decision['pmids']) if decision['approved'] else 'rejected'}. {decision['reason']}")
+                else:
+                    ok = ask("Approve? [y/N] ").strip().lower() in ("y", "yes")
+                    decision = {"approved": ok, "reason": "" if ok else ask("Reason (sent to the agent): ").strip()}
+                g.invoke(Command(resume=decision), cfg)
         except Exception as e:  # a rate limit or model hiccup on one question shouldn't end the batch
             print(f"\nSkipped after an error: {type(e).__name__}: {str(e)[:200]}")
             results.append({"question": q, "answer": None, "error": str(e)})
@@ -123,13 +130,14 @@ def main(argv=None):
     rv.add_argument("--wait", action="store_true", help="keep polling until no run is queued, running or waiting")
     lo = sub.add_parser("run", help="research in this process, no Docker needed")
     lo.add_argument("file", nargs="?", default="seeds.txt")
+    lo.add_argument("--auto", action="store_true", help="a rule-based reviewer approves saves instead of you (see orchestrator/review.py)")
     a = ap.parse_args(argv)
     if a.cmd == "run":
         load_env()
         if os.getenv("LIBRARY_TARGET") == "spotter" and not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
             raise SystemExit("LIBRARY_TARGET=spotter but SUPABASE_SERVICE_ROLE_KEY is empty in .env. Paste the sb_secret_ key there first.")
         print(f"Approved studies go to: {'Spotter (production library)' if os.getenv('LIBRARY_TARGET') == 'spotter' else os.getenv('LIBRARY_LOG', 'library.jsonl')}")
-        run_local(a.file)
+        run_local(a.file, auto=a.auto)
         return
     with httpx.Client(base_url=API, timeout=30) as c:
         if a.cmd == "seed":
