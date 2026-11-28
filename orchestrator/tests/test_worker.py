@@ -22,5 +22,5 @@ def test_failed_run_resumes_from_checkpoint(monkeypatch):
     monkeypatch.setattr(worker.db, "update_run", lambda run_id, **f: updates.append(f))
 
     worker.execute("r1", goal="q")
-    assert calls == [({"goal": "q"}, worker.config("r1")), (None, worker.config("r1"))]
+    assert calls == [({"goal": "q", "require": []}, worker.config("r1")), (None, worker.config("r1"))]
     assert updates[-1] == {"status": "done", "answer": "ok"}

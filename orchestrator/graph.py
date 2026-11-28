@@ -36,6 +36,7 @@ class State(TypedDict, total=False):
     iterations: int
     answer: str | None
     next: str  # where reflect sends the run: "plan" | "act" | "end"
+    require: list[str]  # tools the run must call before it can finish, e.g. ["save_to_library"]
 
 
 class Plan(BaseModel):
@@ -66,9 +67,19 @@ def _observations(s: State) -> str:
     return "\n\n".join(f"Observation {i + 1}, from the {o['tool']} tool with input {o['input']}:\n{o['output'][:3000]}" for i, o in enumerate(obs)) or "(none yet)"
 
 
+def read_studies(observations: list[dict]) -> dict[str, str]:
+    """PMID -> title for every abstract the agent actually read."""
+    return {
+        m[1]: m[2].strip()
+        for o in observations
+        if o["tool"] == "read_abstracts"
+        for m in re.finditer(r"^PMID (\d+) \(.*\)\n(.*)$", o["output"], re.M)
+    }
+
+
 def clean_citations(text: str, observations: list[dict]) -> str:
     """Keep [PMID:n] only for abstracts the agent actually read, as Spotter's Ask does."""
-    read = {p for o in observations if o["tool"] == "read_abstracts" for p in re.findall(r"^PMID (\d+) \(", o["output"], re.M)}
+    read = read_studies(observations)
     text = re.sub(r"\[?PMID:?\s*(\d{5,9})\]?", lambda m: f"[PMID:{m[1]}]" if m[1] in read else "", text)
     return re.sub(r"[ \t]+([.,;:])", r"\1", text)
 
@@ -102,8 +113,9 @@ def build_graph(llm, log: Callable = lambda *a, **k: None, checkpointer=None):
         current = s["plan"][s["step"]]
         prompt = (
             f"Goal: {s['goal']}\nPlan: {s['plan']}\nCurrent step ({s['step'] + 1}/{len(s['plan'])}): {current}\n\n"
-            f"Observations so far:\n{_observations(s)}\n\nCall exactly one tool for the current step. "
-            "If no tool is needed, reply in text instead."
+            f"Observations so far:\n{_observations(s)}\n\n"
+            + (f"Reviewer's note on progress: {s['critique']}\n\n" if s.get("critique") else "")
+            + "Call exactly one tool for the current step. If no tool is needed, reply in text instead."
         )
         text, name, args = llm.choose_tool(SYSTEM, prompt, list(TOOLS.values()))
         return {"pending": {"tool": name, "input": args, "text": text}}
@@ -121,9 +133,18 @@ def build_graph(llm, log: Callable = lambda *a, **k: None, checkpointer=None):
             parsed = t.schema.model_validate(args)
         except ValidationError as e:
             return {"pending": None, "observations": [{**obs, "output": f"Invalid input: {e.errors(include_url=False)}"}]}
+        extra = {}
+        if name == "save_to_library":
+            # the library is evidence Spotter's Ask leans on: only studies the agent read go in
+            read = read_studies(s.get("observations") or [])
+            unread = [p for p in parsed.pmids if p not in read]
+            if len(unread) == len(parsed.pmids):
+                return {"pending": None, "observations": [{**obs, "output": f"Not saved: read the abstracts of {', '.join(unread)} with read_abstracts first."}]}
+            parsed = parsed.model_copy(update={"pmids": [p for p in parsed.pmids if p in read]})
+            extra = {"studies": [{"pmid": p, "title": read[p]} for p in parsed.pmids], "dropped_unread": unread}
         if t.high_risk:
             # pauses the run; resumed with Command(resume={"approved": bool, "reason": str})
-            decision = interrupt({"tool": name, "input": parsed.model_dump(), "why": call.get("text", "")})
+            decision = interrupt({"tool": name, "input": parsed.model_dump(), "why": call.get("text", ""), **extra})
             if not decision.get("approved"):
                 out = f"A human rejected this action. Reason: {decision.get('reason') or 'none given'}. Do not retry it."
                 return {"pending": None, "observations": [{**obs, "output": out}]}
@@ -142,6 +163,12 @@ def build_graph(llm, log: Callable = lambda *a, **k: None, checkpointer=None):
             + ("This is the last iteration: set done=true and answer with what you have, saying what is uncertain." if last else "Decide whether the goal is answered.")
         )
         r = llm.structured(SYSTEM + NO_TOOLS + "\nYou review progress honestly. If more information is needed, set done=false and say what to do next in the critique.", prompt, Reflection)
+        # models claim actions they never took ("Saved to the library"): a run can't finish
+        # until every required tool was actually attempted (a human rejection counts)
+        tried = {o["tool"] for o in s.get("observations") or []}
+        missing = [t for t in s.get("require") or [] if t not in tried]
+        if r.done and missing and not last:
+            r = r.model_copy(update={"done": False, "replan": False, "critique": f"{r.critique}\nNot finished: call {', '.join(missing)} now; it has not been called yet."})
         out = {"iterations": n, "critique": r.critique}
         if r.done or last:
             out["answer"] = clean_citations(r.answer or r.critique, s.get("observations") or [])

@@ -36,11 +36,11 @@ def pending_approval(g, run_id: str) -> dict | None:
     return st.interrupts[0].value if st.interrupts else None
 
 
-def execute(run_id: str, goal: str | None = None, decision: dict | None = None, checkpoint_id: str | None = None):
+def execute(run_id: str, goal: str | None = None, decision: dict | None = None, checkpoint_id: str | None = None, require: list[str] | None = None):
     """Start (goal), resume after a human decision (decision), or replay from a checkpoint (checkpoint_id)."""
     db.update_run(run_id, status="running", error=None)
     with graph(get_llm()) as g:
-        payload = {"goal": goal} if goal else Command(resume=decision) if decision is not None else None
+        payload = {"goal": goal, "require": require or []} if goal else Command(resume=decision) if decision is not None else None
         for attempt in range(3):
             try:
                 # retries resume from the last checkpoint, so finished nodes don't run again
@@ -59,5 +59,5 @@ def execute(run_id: str, goal: str | None = None, decision: dict | None = None, 
 
 
 @app.task(name="orchestrator.run")
-def run_agent(run_id: str, goal: str | None = None, decision: dict | None = None, checkpoint_id: str | None = None):
-    execute(run_id, goal, decision, checkpoint_id)
+def run_agent(run_id: str, goal: str | None = None, decision: dict | None = None, checkpoint_id: str | None = None, require: list[str] | None = None):
+    execute(run_id, goal, decision, checkpoint_id, require)
