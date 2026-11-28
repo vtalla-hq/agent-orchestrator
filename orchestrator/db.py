@@ -29,8 +29,14 @@ create table if not exists steps (
   created_at timestamptz default now()
 );
 create index if not exists steps_run on steps(run_id, id);
+-- approved saves, in Spotter's studies shape plus the reviewer's note (Spotter has no note column)
 create table if not exists library (
   pmid text primary key,
+  title text not null,
+  journal text,
+  year int,
+  types text[] not null default '{}',
+  url text not null,
   note text,
   added_at timestamptz default now()
 );
@@ -75,11 +81,19 @@ def get_steps(run_id: str) -> list[dict]:
         return c.execute("select node, status, output, error, ms, created_at from steps where run_id = %s order by id", (run_id,)).fetchall()
 
 
-def save_studies(pmids: list[str], note: str) -> int:
+def list_runs(status: str | None = None) -> list[dict]:
     with conn() as c:
-        cur = c.cursor()
-        cur.executemany(
-            "insert into library (pmid, note) values (%s, %s) on conflict (pmid) do update set note = excluded.note",
-            [(p, note) for p in pmids],
+        q = "select id, goal, status, updated_at from runs" + (" where status = %s" if status else "") + " order by created_at"
+        return c.execute(q, (status,) if status else ()).fetchall()
+
+
+def save_studies(rows: list[dict], note: str) -> int:
+    """Record approved studies (rows in Spotter's shape, see library.rows) locally."""
+    with conn() as c:
+        c.cursor().executemany(
+            """insert into library (pmid, title, journal, year, types, url, note)
+               values (%(pmid)s, %(title)s, %(journal)s, %(year)s, %(types)s, %(url)s, %(note)s)
+               on conflict (pmid) do update set note = excluded.note""",
+            [{**r, "note": note} for r in rows],
         )
-        return len(pmids)
+        return len(rows)

@@ -9,13 +9,13 @@ import os
 import socket
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Callable
+from typing import Annotated, Callable
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, Field
 
-from . import db
+from . import library
 
 
 @dataclass(frozen=True)
@@ -93,6 +93,7 @@ def parse_articles(xml: str) -> list[dict]:
                 "title": text(".//ArticleTitle"),
                 "journal": text(".//ISOAbbreviation") or text(".//Journal/Title"),
                 "year": (text(".//PubDate/Year") or text(".//PubDate/MedlineDate"))[:4] or None,
+                "types": [x for x in ("".join(t.itertext()).strip() for t in art.iter("PublicationType")) if x != "Journal Article"],
                 "abstract": " ".join(parts) or "(no abstract)",
             }
         )
@@ -172,16 +173,29 @@ def fetch_page(a: FetchPage) -> str:
 
 
 class SaveStudies(BaseModel):
-    pmids: list[str] = Field(min_length=1, max_length=10)
-    note: str = Field(max_length=500, description="Why these studies matter, shown to everyone")
+    pmids: list[Annotated[str, Field(pattern=r"^\d{5,9}$")]] = Field(min_length=1, max_length=10, description="PMIDs whose abstracts you read")
+    note: str = Field(max_length=500, description="Why these studies matter, for the human reviewer")
+
+
+def fetch_articles(pmids: list[str]) -> list[dict]:
+    return parse_articles(_eutils("efetch.fcgi", id=",".join(pmids), rettype="abstract", retmode="xml").text)
 
 
 @tool(
     "save_to_library",
-    "Add studies to Spotter's shared study library, visible to every user. Needs human approval.",
+    "Add studies you read to Spotter's shared study library, which Spotter's Ask draws on for every user. "
+    "Only strong, relevant studies (meta-analyses, guidelines, RCTs, large cohorts). Needs human approval.",
     SaveStudies,
     high_risk=True,
 )
 def save_to_library(a: SaveStudies) -> str:
-    n = db.save_studies(a.pmids, a.note)
-    return f"Saved {n} studies to the library."
+    # re-fetched from PubMed so only real PMIDs, with PubMed's own metadata, get written
+    rows = library.rows(fetch_articles(a.pmids))
+    if not rows:
+        return "None of those PMIDs exist on PubMed. Nothing saved."
+    library.record(rows, a.note)
+    where = "the local library"
+    if library.target() == "spotter":
+        library.push_to_spotter(rows)
+        where = "Spotter's library"
+    return f"Saved {len(rows)} studies to {where}: {', '.join(r['pmid'] for r in rows)}."
