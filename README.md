@@ -45,7 +45,7 @@ The model is Claude (`claude-opus-5-5`, adaptive thinking, `medium` effort, with
 
 ## Run it
 
-Free: set `LLM_PROVIDER=groq` with a free Groq key. The worker runs one research run at a time so Groq's free tier (8k tokens a minute) isn't rate limited by its own runs.
+Free: set `LLM_PROVIDER=groq` with a free Groq key, and keep `AI_MODEL` on a model Spotter's Ask doesn't use (`.env.example` uses `qwen/qwen3.8-27b`). Groq caps tokens per model per day, and the first full library run used up Ask's daily allowance on `gpt-oss-120b`. The worker runs one research run at a time so Groq's free tier (8k tokens a minute) isn't rate limited by its own runs.
 
 ```bash
 cp .env.example .env    # set ANTHROPIC_API_KEY (or LLM_PROVIDER=groq + GROQ_API_KEY)
