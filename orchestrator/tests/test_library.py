@@ -123,3 +123,16 @@ def test_run_local_researches_waits_and_saves_on_approval(fakes, monkeypatch, tm
     assert res["answer"] == "No [PMID:12345678]."
     assert [json.loads(x) for x in log.read_text().splitlines()] == [{**ROW, "note": "meta-analysis, no harm"}]
     assert saved == [] and posts == []  # local log only: no Postgres, no Supabase
+
+
+def test_load_env_reads_dotenv_without_overriding(tmp_path, monkeypatch):
+    f = tmp_path / ".env"
+    f.write_text('# c\nLIBRARY_TARGET=spotter\nSUPABASE_URL="https://x.supabase.co"\nSUPABASE_SERVICE_ROLE_KEY=\nAI_MODEL=from-file\n', encoding="utf-8")
+    for k in ("LIBRARY_TARGET", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("AI_MODEL", "from-shell")
+    cli.load_env(str(f))
+    import os
+
+    assert os.environ["LIBRARY_TARGET"] == "spotter" and os.environ["SUPABASE_URL"] == "https://x.supabase.co"
+    assert os.environ["SUPABASE_SERVICE_ROLE_KEY"] == "" and os.environ["AI_MODEL"] == "from-shell"

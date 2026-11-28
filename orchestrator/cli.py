@@ -86,16 +86,32 @@ def run_local(path: str, llm=None, ask=input) -> list[dict]:
     for i, q in enumerate(questions(path)):
         cfg = {"configurable": {"thread_id": f"local-{i}"}}
         print(f"\n=== {q}")
-        g.invoke({"goal": GOAL.format(q=q), "require": ["save_to_library"]}, cfg)
-        while (st := g.get_state(cfg)).interrupts:
-            print(show({"id": f"local-{i}", "goal": q, "pending_approval": st.interrupts[0].value}))
-            ok = ask("Approve? [y/N] ").strip().lower() in ("y", "yes")
-            reason = "" if ok else ask("Reason (sent to the agent): ").strip()
-            g.invoke(Command(resume={"approved": ok, "reason": reason}), cfg)
+        try:
+            g.invoke({"goal": GOAL.format(q=q), "require": ["save_to_library"]}, cfg)
+            while (st := g.get_state(cfg)).interrupts:
+                print(show({"id": f"local-{i}", "goal": q, "pending_approval": st.interrupts[0].value}))
+                ok = ask("Approve? [y/N] ").strip().lower() in ("y", "yes")
+                reason = "" if ok else ask("Reason (sent to the agent): ").strip()
+                g.invoke(Command(resume={"approved": ok, "reason": reason}), cfg)
+        except Exception as e:  # a rate limit or model hiccup on one question shouldn't end the batch
+            print(f"\nSkipped after an error: {type(e).__name__}: {str(e)[:200]}")
+            results.append({"question": q, "answer": None, "error": str(e)})
+            continue
         answer = g.get_state(cfg).values.get("answer")
         print(f"\nAnswer: {answer}")
         results.append({"question": q, "answer": answer})
     return results
+
+
+def load_env(path: str = ".env") -> None:
+    """KEY=value lines from .env into the environment (docker compose does this for the API; `run` has no compose)."""
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for ln in f:
+            k, sep, v = ln.strip().partition("=")
+            if sep and k and not k.startswith("#"):
+                os.environ.setdefault(k.strip(), v.strip().strip('"'))
 
 
 def main(argv=None):
@@ -109,6 +125,10 @@ def main(argv=None):
     lo.add_argument("file", nargs="?", default="seeds.txt")
     a = ap.parse_args(argv)
     if a.cmd == "run":
+        load_env()
+        if os.getenv("LIBRARY_TARGET") == "spotter" and not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+            raise SystemExit("LIBRARY_TARGET=spotter but SUPABASE_SERVICE_ROLE_KEY is empty in .env. Paste the sb_secret_ key there first.")
+        print(f"Approved studies go to: {'Spotter (production library)' if os.getenv('LIBRARY_TARGET') == 'spotter' else os.getenv('LIBRARY_LOG', 'library.jsonl')}")
         run_local(a.file)
         return
     with httpx.Client(base_url=API, timeout=30) as c:
